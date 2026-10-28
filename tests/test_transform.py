@@ -14,7 +14,7 @@ def test_weather_to_rows_pairs_hourly_values():
             "time": ["2026-01-01T00:00", "2026-01-01T01:00"],
             "temperature_2m": [1.9, 1.5],
             "precipitation": [0.0, 0.2],
-        }
+        },
     }
 
     rows = weather_to_rows(payload)
@@ -27,6 +27,7 @@ def test_weather_to_rows_pairs_hourly_values():
             "longitude": -3.7038,
             "temperature_2m": 1.9,
             "precipitation_mm": 0.0,
+            "wind_speed_10m_ms": None,
         },
         {
             "source": "open_meteo",
@@ -35,6 +36,7 @@ def test_weather_to_rows_pairs_hourly_values():
             "longitude": -3.7038,
             "temperature_2m": 1.5,
             "precipitation_mm": 0.2,
+            "wind_speed_10m_ms": None,
         },
     ]
 
@@ -48,7 +50,7 @@ def test_weather_to_rows_rejects_different_list_lengths():
             "time": ["2026-01-01T00:00", "2026-01-01T01:00"],
             "temperature_2m": [1.9],
             "precipitation": [0.0, 0.2],
-        }
+        },
     }
 
     with pytest.raises(ValueError, match="same number of values"):
@@ -156,6 +158,42 @@ def test_weather_to_rows_preserves_missing_measurements():
 
     assert rows[0]["temperature_2m"] is None
     assert rows[0]["precipitation_mm"] is None
+    assert rows[0]["wind_speed_10m_ms"] is None
+
+
+def test_weather_to_rows_reads_wind_in_metres_per_second():
+    payload = {
+        "latitude": 40.4,
+        "longitude": -3.7,
+        "timezone": "UTC",
+        "hourly": {
+            "time": ["2026-01-01T00:00"],
+            "temperature_2m": [10.0],
+            "precipitation": [0.0],
+            "wind_speed_10m": [5.2],
+        },
+    }
+
+    rows = weather_to_rows(payload)
+
+    assert rows[0]["wind_speed_10m_ms"] == 5.2
+
+
+def test_weather_to_rows_rejects_negative_wind_speed():
+    payload = {
+        "latitude": 40.4,
+        "longitude": -3.7,
+        "timezone": "UTC",
+        "hourly": {
+            "time": ["2026-01-01T00:00"],
+            "temperature_2m": [10.0],
+            "precipitation": [0.0],
+            "wind_speed_10m": [-0.1],
+        },
+    }
+
+    with pytest.raises(ValueError, match="wind_speed_10m.*cannot be negative"):
+        weather_to_rows(payload)
 
 
 def test_weather_to_rows_rejects_ambiguous_local_time():
@@ -172,6 +210,42 @@ def test_weather_to_rows_rejects_ambiguous_local_time():
 
     with pytest.raises(ValueError, match="Ambiguous local weather timestamp"):
         weather_to_rows(payload)
+
+
+def test_weather_to_rows_rejects_nonexistent_local_time_at_spring_dst():
+    payload = {
+        "latitude": 40.4,
+        "longitude": -3.7,
+        "timezone": "Europe/Madrid",
+        "hourly": {
+            "time": ["2026-03-29T02:00"],
+            "temperature_2m": [10.0],
+            "precipitation": [0.0],
+        },
+    }
+
+    with pytest.raises(ValueError, match="Nonexistent local weather timestamp"):
+        weather_to_rows(payload)
+
+
+def test_weather_to_rows_distinguishes_both_fall_back_hours_with_offsets():
+    payload = {
+        "latitude": 40.4,
+        "longitude": -3.7,
+        "timezone": "Europe/Madrid",
+        "hourly": {
+            "time": ["2026-10-25T02:00+02:00", "2026-10-25T02:00+01:00"],
+            "temperature_2m": [10.0, 9.0],
+            "precipitation": [0.0, 0.0],
+        },
+    }
+
+    rows = weather_to_rows(payload)
+
+    assert [row["observed_at"] for row in rows] == [
+        datetime(2026, 10, 25, 0, tzinfo=timezone.utc),
+        datetime(2026, 10, 25, 1, tzinfo=timezone.utc),
+    ]
 
 
 def test_weather_to_rows_rejects_duplicate_timestamps():

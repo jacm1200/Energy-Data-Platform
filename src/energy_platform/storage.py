@@ -12,8 +12,14 @@ CREATE TABLE IF NOT EXISTS weather_observations (
     longitude DOUBLE PRECISION NOT NULL,
     temperature_2m DOUBLE PRECISION,
     precipitation_mm DOUBLE PRECISION,
+    wind_speed_10m_ms DOUBLE PRECISION,
     PRIMARY KEY (source, observed_at, latitude, longitude)
 )
+"""
+
+MIGRATE_WEATHER_WIND = """
+ALTER TABLE weather_observations
+ADD COLUMN IF NOT EXISTS wind_speed_10m_ms DOUBLE PRECISION
 """
 
 UPSERT_WEATHER_ROW = """
@@ -23,13 +29,15 @@ INSERT INTO weather_observations (
     latitude,
     longitude,
     temperature_2m,
-    precipitation_mm
+    precipitation_mm,
+    wind_speed_10m_ms
 )
-VALUES (%s, %s, %s, %s, %s, %s)
+VALUES (%s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (source, observed_at, latitude, longitude)
 DO UPDATE SET
     temperature_2m = EXCLUDED.temperature_2m,
-    precipitation_mm = EXCLUDED.precipitation_mm
+    precipitation_mm = EXCLUDED.precipitation_mm,
+    wind_speed_10m_ms = EXCLUDED.wind_speed_10m_ms
 """
 
 CREATE_DAY_AHEAD_PRICES_TABLE = """
@@ -75,6 +83,7 @@ def upsert_weather_rows(
             row["longitude"],
             row["temperature_2m"],
             row["precipitation_mm"],
+            row["wind_speed_10m_ms"],
         )
         for row in rows
     ]
@@ -82,6 +91,7 @@ def upsert_weather_rows(
     with psycopg.connect(database_url) as connection:
         with connection.cursor() as cursor:
             cursor.execute(CREATE_WEATHER_TABLE)
+            cursor.execute(MIGRATE_WEATHER_WIND)
             if values:
                 cursor.executemany(UPSERT_WEATHER_ROW, values)
 

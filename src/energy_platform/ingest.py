@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
-import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,19 +16,46 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from energy_platform.logging_utils import configure_logging
+
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 ENTSOE_URL = "https://web-api.tp.entsoe.eu/api"
 WEATHER_URL = "https://archive-api.open-meteo.com/v1/archive"
 ES_BIDDING_ZONE = "10YES-REE------0"
 
 
-def fetch_bytes(url: str, timeout: int = 30) -> bytes:
+def fetch_bytes(
+    url: str,
+    timeout: int = 30,
+    max_attempts: int = 3,
+    retry_delay: float = 1.0,
+) -> bytes:
     request = urllib.request.Request(url, headers={"User-Agent": "energy-data-platform/0.1"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        if response.status != 200:
-            raise RuntimeError(f"Source returned HTTP {response.status}")
-        return response.read()
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+
+    retryable_statuses = {408, 425, 429, 500, 502, 503, 504}
+    for attempt in range(max_attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"Source returned HTTP {response.status}")
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code not in retryable_statuses or attempt == max_attempts - 1:
+                raise
+            logger.warning("Transient HTTP %s from source; retrying", exc.code)
+        except urllib.error.URLError:
+            if attempt == max_attempts - 1:
+                raise
+            logger.warning("Temporary source connection failure; retrying")
+
+        time.sleep(retry_delay * (2**attempt))
+
+    raise RuntimeError("Source request failed without an exception")
 
 
 def landing_path(raw_dir: Path, source: str, start: date, end: date, suffix: str) -> Path:
@@ -35,21 +63,26 @@ def landing_path(raw_dir: Path, source: str, start: date, end: date, suffix: str
     return raw_dir / source / f"{start.isoformat()}_{end.isoformat()}" / f"{run_id}.{suffix}"
 
 
-def land_response(raw_dir: Path, source: str, start: date, end: date, suffix: str, body: bytes) -> Path:
+def land_response(
+    raw_dir: Path, source: str, start: date, end: date, suffix: str, body: bytes
+) -> Path:
     destination = landing_path(raw_dir, source, start, end, suffix)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(body)
     return destination
 
 
-def weather_url(start: date, end: date, latitude: float, longitude: float, timezone_name: str) -> str:
+def weather_url(
+    start: date, end: date, latitude: float, longitude: float, timezone_name: str
+) -> str:
     params = {
         "latitude": latitude,
         "longitude": longitude,
         "start_date": start.isoformat(),
         # Open-Meteo's end_date is inclusive; the CLI uses an exclusive end.
         "end_date": (end - timedelta(days=1)).isoformat(),
-        "hourly": "temperature_2m,precipitation",
+        "hourly": "temperature_2m,precipitation,wind_speed_10m",
+        "wind_speed_unit": "ms",
         "timezone": timezone_name,
     }
     return WEATHER_URL + "?" + urllib.parse.urlencode(params)
@@ -71,12 +104,34 @@ def entsoe_url(start: date, end: date, token: str) -> str:
 def ingest_weather(raw_dir: Path, start: date, end: date) -> Path:
     latitude = float(os.getenv("WEATHER_LATITUDE", "40.4168"))
     longitude = float(os.getenv("WEATHER_LONGITUDE", "-3.7038"))
-    timezone_name = os.getenv("WEATHER_TIMEZONE", "Europe/Madrid")
+    timezone_name = os.getenv("WEATHER_TIMEZONE", "UTC")
     body = fetch_bytes(weather_url(start, end, latitude, longitude, timezone_name))
+    if not body.strip():
+        raise ValueError("Open-Meteo returned an empty response")
     # Refuse to land an API error payload as if it were a successful dataset.
     payload = json.loads(body)
-    if "hourly" not in payload or "hourly_units" not in payload:
+    if not isinstance(payload, dict):
         raise ValueError("Open-Meteo response does not contain expected hourly data")
+    hourly = payload.get("hourly")
+    hourly_units = payload.get("hourly_units")
+    required_fields = ("time", "temperature_2m", "precipitation", "wind_speed_10m")
+    if not isinstance(hourly, dict) or not isinstance(hourly_units, dict):
+        raise ValueError("Open-Meteo response does not contain expected hourly data")
+    if any(field not in hourly for field in required_fields):
+        raise ValueError("Open-Meteo response is missing requested hourly fields")
+    expected_units = {
+        "temperature_2m": "°C",
+        "precipitation": "mm",
+        "wind_speed_10m": "m/s",
+    }
+    for field, unit in expected_units.items():
+        if hourly_units.get(field) != unit:
+            raise ValueError(f"Open-Meteo unit for '{field}' must be {unit}")
+    values = [hourly[field] for field in required_fields]
+    if any(not isinstance(field_values, list) for field_values in values):
+        raise ValueError("Open-Meteo hourly fields must be lists")
+    if len({len(field_values) for field_values in values}) != 1:
+        raise ValueError("Open-Meteo hourly fields have different lengths")
     return land_response(raw_dir, "open_meteo", start, end, "json", body)
 
 
@@ -95,16 +150,21 @@ def ingest_entsoe(raw_dir: Path, start: date, end: date) -> Path:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", choices=("weather", "electricity", "all"), default="weather")
-    parser.add_argument("--start", type=date.fromisoformat, required=True, help="Start day, YYYY-MM-DD")
-    parser.add_argument("--end", type=date.fromisoformat, required=True, help="End day, YYYY-MM-DD (exclusive)")
+    parser.add_argument(
+        "--start", type=date.fromisoformat, required=True, help="Start day, YYYY-MM-DD"
+    )
+    parser.add_argument(
+        "--end", type=date.fromisoformat, required=True, help="End day, YYYY-MM-DD (exclusive)"
+    )
     parser.add_argument("--raw-dir", type=Path, default=Path(os.getenv("RAW_DATA_DIR", "data/raw")))
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_logging()
     args = parse_args(argv)
     if args.end <= args.start:
-        print("--end must be later than --start", file=sys.stderr)
+        logger.error("--end must be later than --start")
         return 2
     jobs = []
     if args.source in ("weather", "all"):
@@ -115,10 +175,10 @@ def main(argv: list[str] | None = None) -> int:
     for label, job in jobs:
         try:
             path = job(args.raw_dir, args.start, args.end)
-            print(f"{label}: landed raw response at {path}")
-        except (urllib.error.URLError, TimeoutError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+            logger.info("%s: landed raw response at %s", label, path)
+        except (urllib.error.URLError, TimeoutError, ValueError, RuntimeError) as exc:
             failures += 1
-            print(f"{label}: ingestion failed: {exc}", file=sys.stderr)
+            logger.error("%s: ingestion failed: %s", label, exc)
     return 1 if failures else 0
 
 

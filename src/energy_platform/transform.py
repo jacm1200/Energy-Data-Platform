@@ -17,18 +17,20 @@ def _to_utc(timestamp: Any, source_timezone: ZoneInfo) -> datetime:
     if parsed.tzinfo is None:
         first_fold = parsed.replace(tzinfo=source_timezone, fold=0)
         second_fold = parsed.replace(tzinfo=source_timezone, fold=1)
-        if first_fold.utcoffset() != second_fold.utcoffset():
-            raise ValueError(f"Ambiguous local weather timestamp: {timestamp}")
-
-        round_trip = (
-            first_fold
-            .astimezone(timezone.utc)
-            .astimezone(source_timezone)
-            .replace(tzinfo=None)
+        first_round_trip = (
+            first_fold.astimezone(timezone.utc).astimezone(source_timezone).replace(tzinfo=None)
         )
-        if round_trip != parsed:
+        second_round_trip = (
+            second_fold.astimezone(timezone.utc).astimezone(source_timezone).replace(tzinfo=None)
+        )
+        first_matches = first_round_trip == parsed
+        second_matches = second_round_trip == parsed
+        offsets_differ = first_fold.utcoffset() != second_fold.utcoffset()
+        if first_matches and second_matches and offsets_differ:
+            raise ValueError(f"Ambiguous local weather timestamp: {timestamp}")
+        if not first_matches and not second_matches:
             raise ValueError(f"Nonexistent local weather timestamp: {timestamp}")
-        parsed = first_fold
+        parsed = first_fold if first_matches else second_fold
 
     return parsed.astimezone(timezone.utc)
 
@@ -41,8 +43,8 @@ def _validate_measurement(value: Any, field: str) -> None:
         raise ValueError(f"Weather measurement '{field}' must be numeric or null")
     if not math.isfinite(value):
         raise ValueError(f"Weather measurement '{field}' must be finite")
-    if field == "precipitation" and value < 0:
-        raise ValueError("Weather precipitation cannot be negative")
+    if field in {"precipitation", "wind_speed_10m"} and value < 0:
+        raise ValueError(f"Weather measurement '{field}' cannot be negative")
 
 
 def weather_to_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -86,26 +88,28 @@ def weather_to_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     temperatures = hourly["temperature_2m"]
     precipitation_values = hourly["precipitation"]
 
-    if not all(
-        isinstance(values, list)
-        for values in (times, temperatures, precipitation_values)
-    ):
+    if not all(isinstance(values, list) for values in (times, temperatures, precipitation_values)):
+        raise ValueError("Weather hourly fields must be lists")
+    wind_values = hourly.get("wind_speed_10m", [None] * len(times))
+    if not isinstance(wind_values, list):
         raise ValueError("Weather hourly fields must be lists")
 
     lengths = {
         len(times),
         len(temperatures),
         len(precipitation_values),
+        len(wind_values),
     }
     if len(lengths) != 1:
         raise ValueError("Weather hourly fields must have the same number of values")
 
-    rows = []
-    seen_timestamps = set()
-    for timestamp, temperature, precipitation in zip(
+    rows: list[dict[str, Any]] = []
+    seen_timestamps: set[datetime] = set()
+    for timestamp, temperature, precipitation, wind in zip(
         times,
         temperatures,
         precipitation_values,
+        wind_values,
     ):
         observed_at = _to_utc(timestamp, source_timezone)
         if observed_at in seen_timestamps:
@@ -113,6 +117,7 @@ def weather_to_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
         seen_timestamps.add(observed_at)
         _validate_measurement(temperature, "temperature_2m")
         _validate_measurement(precipitation, "precipitation")
+        _validate_measurement(wind, "wind_speed_10m")
 
         rows.append(
             {
@@ -122,6 +127,7 @@ def weather_to_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "longitude": longitude,
                 "temperature_2m": temperature,
                 "precipitation_mm": precipitation,
+                "wind_speed_10m_ms": wind,
             }
         )
 
