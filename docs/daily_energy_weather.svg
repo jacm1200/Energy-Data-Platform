@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="800" viewBox="0 0 960 800">
+<style>text{font-family:Arial,sans-serif;fill:#172033}.title{font-size:18px;font-weight:bold}.tick,.note{font-size:12px}.axis{stroke:#9aa4b2;stroke-width:1}</style>
+<text x="90" y="28" class="title">Daily electricity price and weather (UTC)</text>
+<text x="90" y="48" class="note">Coverage: 4 price intervals; 24 temperature and 24 wind observations</text>
+<text x="90" y="72" class="title">Daily average price (EUR/MWh)</text>
+<line x1="90" y1="260" x2="930" y2="260" class="axis"/>
+<circle cx="90.0" cy="260.0" r="4" fill="#be3c35"/>
+<text x="78" y="94" text-anchor="end" class="tick">20.12</text>
+<text x="78" y="260" text-anchor="end" class="tick">20.12</text>
+<text x="90" y="297" class="title">Daily average temperature (°C)</text>
+<line x1="90" y1="485" x2="930" y2="485" class="axis"/>
+<circle cx="90.0" cy="485.0" r="4" fill="#e18b24"/>
+<text x="78" y="319" text-anchor="end" class="tick">1.20</text>
+<text x="78" y="485" text-anchor="end" class="tick">1.20</text>
+<text x="90" y="522" class="title">Daily average wind speed (m/s)</text>
+<line x1="90" y1="710" x2="930" y2="710" class="axis"/>
+<circle cx="90.0" cy="710.0" r="4" fill="#277da1"/>
+<text x="78" y="544" text-anchor="end" class="tick">1.07</text>
+<text x="78" y="710" text-anchor="end" class="tick">1.07</text>
+<text x="90" y="750" class="tick">2026-01-01 to 2026-01-01</text>
+<text x="90" y="775" class="tick">Weather data by Open-Meteo.com (CC BY 4.0). Daily averages are descriptive.</text>
+</svg>

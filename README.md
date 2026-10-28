@@ -1,108 +1,85 @@
 # Energy Data Platform
 
-A local data engineering portfolio project for exploring relationships between Spanish day-ahead electricity prices and weather observations. The analysis compares time series; it does not claim that weather causes price movements.
+I built this local data platform to collect Spanish day-ahead electricity prices and historical weather, preserve source responses, load normalized observations into PostgreSQL, and compare their daily patterns. The analysis is descriptive; it does not establish that weather causes price changes.
 
-## Data sources
-
-| Data | Provider | Access and use |
-| --- | --- | --- |
-| Day-ahead prices, Spain bidding zone | [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) | Free platform data. REST API access requires a registered account, an access request by email, and a security token. The API is not usable until access is granted. |
-| Historical weather observations | [Open-Meteo Archive API](https://open-meteo.com/en/docs/historical-weather-api) | Free for non-commercial use under published request limits. Data is CC BY 4.0 and must be attributed. This portfolio project is assumed to be non-commercial; use a paid plan if that changes. |
-
-The Spanish ENTSO-E bidding zone code used here is `10YES-REE------0`. Source API terms and access rules can change; review the linked provider terms before publishing or using the data commercially. Do not commit API tokens.
-
-## Architecture and roadmap
+## Architecture
 
 ```mermaid
 flowchart LR
-    E[ENTSO-E day-ahead prices] --> I[Python ingestion and validation]
-    W[Open-Meteo archive weather] --> I
-    I --> R[(Immutable raw files)]
-    R --> T[Weather transform and UTC normalization]
-    T --> P[(PostgreSQL weather observations)]
-    R --> X[ENTSO-E A44 XML parser]
-    X --> Q[(PostgreSQL day-ahead prices)]
-    P -. later .-> D[dbt staging and marts]
-    A[Airflow orchestration] -. later .-> I
-    D -. later .-> V[Dashboard]
+    E[ENTSO-E A44 prices] --> I[Python extraction and validation]
+    W[Open-Meteo historical weather: temperature, precipitation, wind] --> I
+    I --> R[(Immutable raw JSON/XML files)]
+    R --> P[Python parsers and UTC normalization]
+    P --> PG[(PostgreSQL with idempotent upserts)]
+    PG --> SQL[Daily price and weather SQL]
+    SQL --> V[Example report and chart]
 ```
 
-1. **Phase 1 (complete):** configurable API extraction into a local raw landing zone with request checks and focused tests.
-2. **Phase 2 (in progress):** weather and day-ahead price normalization, input checks, and idempotent PostgreSQL upserts; live ENTSO-E verification, broader quality tests, and GitHub Actions remain to do.
-3. **Phase 3:** dbt staging/intermediate/mart models and business SQL.
-4. **Phase 4:** Airflow DAGs, retries, structured logs, and run metrics.
-5. **Phase 5:** dashboard, representative output screenshots/examples, and portfolio polish.
+I use ENTSO-E's Transparency Platform for Spanish day-ahead prices and Open-Meteo's Historical Weather API for hourly weather. ENTSO-E REST access requires an approved account and token. Open-Meteo documents free non-commercial access with request limits and CC BY 4.0 attribution; commercial use requires checking its current plan and terms. See the linked [ENTSO-E API guide](https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html) and [Open-Meteo archive documentation](https://open-meteo.com/en/docs/historical-weather-api).
 
-The present phase intentionally stops at raw ingestion. It does not claim that transformed data or a dashboard already exists.
+## Run locally
 
-## Windows setup (PowerShell)
-
-Install Python 3.11+, Git, Docker Desktop, and VS Code. From the repository folder:
+### Windows (PowerShell)
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
+pre-commit install
 Copy-Item .env.example .env
-```
-
-Open `.env` and set `ENTSOE_API_TOKEN` after requesting and receiving ENTSO-E REST access. Never commit `.env`. Open-Meteo does not need a key. The default weather coordinates are Madrid and can be changed in `.env`.
-
-Start local PostgreSQL:
-
-```powershell
 docker compose up -d postgres
-docker compose ps
 ```
 
-The Compose service reads its local database settings from `.env`. It publishes PostgreSQL on host port `5433` to avoid conflicts with a local PostgreSQL installation on port `5432`. If you created `.env` before the database variables were added to `.env.example`, copy the `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `DATABASE_URL` entries into it.
-
-Download weather for a half-open date range `[start, end)` (no API key required):
+Edit `.env` with your local settings. Set `WEATHER_TIMEZONE=UTC` to keep the timestamps unambiguous. Add an ENTSO-E token after API access is granted. Open-Meteo does not require a key. Wind speed is requested in metres per second. Fetch one week of weather and load it:
 
 ```powershell
 python -m energy_platform.ingest --source weather --start 2026-01-01 --end 2026-01-08
-```
-
-Download ENTSO-E day-ahead prices once API access is enabled:
-
-```powershell
-python -m energy_platform.ingest --source electricity --start 2026-01-01 --end 2026-01-08
-```
-
-Use `--source all` to attempt both. Raw payloads are written under `data/raw/<source>/<start>_<end>/<run-id>.<format>`. Each run receives a unique file, so a re-fetch does not overwrite the previous source response. No data files or credentials belong in Git.
-
-Load a landed weather response into PostgreSQL (replace the path with a JSON file from your raw folder):
-
-```powershell
 $rawFile = Get-ChildItem .\data\raw\open_meteo\2026-01-01_2026-01-08\*.json | Select-Object -First 1 -ExpandProperty FullName
 python -m energy_platform.load_weather $rawFile
 ```
 
-The loader creates `weather_observations` if needed. Its primary key is `(source, observed_at, latitude, longitude)`. If a row with that key already exists, the UPSERT updates its measurement values instead of inserting a duplicate. Weather timestamps are converted to UTC before storage.
-
-Load the local ENTSO-E A44 XML fixture into PostgreSQL without an API token:
+After ENTSO-E access is granted, fetch prices and load the resulting XML:
 
 ```powershell
-python -m energy_platform.load_entsoe_prices .\tests\fixtures\entsoe_a44_a03_sample.xml
+python -m energy_platform.ingest --source electricity --start 2026-01-01 --end 2026-01-08
+$priceFile = Get-ChildItem .\data\raw\entsoe\2026-01-01_2026-01-08\*.xml | Select-Object -First 1 -ExpandProperty FullName
+python -m energy_platform.load_entsoe_prices $priceFile
 ```
 
-The loader creates `day_ahead_prices` if needed. Its primary key is `(source, area_code, delivery_start)`, and it stores currency and price unit with each interval. Re-running the fixture load updates matching rows instead of duplicating them.
+### Linux and macOS
 
-Run unit tests:
-
-```powershell
-python -m pytest
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e '.[dev]'
+pre-commit install
+cp .env.example .env
+docker compose up -d postgres
+python -m energy_platform.ingest --source weather --start 2026-01-01 --end 2026-01-08
+python -m energy_platform.load_weather "$(find data/raw/open_meteo/2026-01-01_2026-01-08 -name '*.json' | head -n 1)"
 ```
+
+The date range is half-open: `start` is included and `end` is excluded. Open-Meteo expects an inclusive end date, so the extractor adjusts that parameter. Load prices using the same pattern with `python -m energy_platform.load_entsoe_prices <path-to-xml>`. Run checks with `ruff check .` and `python -m pytest`.
+
+After loading both sources, run `python -m energy_platform.report` to query PostgreSQL and generate [`docs/daily_energy_weather.svg`](docs/daily_energy_weather.svg) plus a CSV. The query in [`sql/daily_energy_weather.sql`](sql/daily_energy_weather.sql) groups observations by UTC day and returns interval counts so the daily coverage is visible. The generated chart uses separate scales for price, temperature, and wind. [`docs/example_analysis.md`](docs/example_analysis.md) explains the committed sample result and its limits. [`docs/repository_metadata.md`](docs/repository_metadata.md) contains the suggested GitHub description and topics.
+
+## Technical decisions
+
+- **Raw before normalized:** each API response is stored as a new file under `data/raw/` and is never overwritten. This gives me an audit trail and lets me re-run parsing after code changes.
+- **UTC timestamps:** the weather request uses UTC by default and ENTSO-E intervals are parsed as UTC, making daily joins independent of machine timezone. The parser can convert offset-aware weather timestamps. Local naive timestamps in a DST fold or gap are rejected because the source timestamp alone cannot identify a unique instant.
+- **Idempotent loads:** PostgreSQL primary keys identify a source observation; `INSERT ... ON CONFLICT DO UPDATE` makes reruns safe and refreshes changed values.
+- **Small local stack:** Python and PostgreSQL in Docker Compose keep the project runnable without a paid cloud service. I keep source extraction, parsing, and database writes in separate modules so each can be tested independently.
 
 ## Current limitations
 
-- The raw API response is retained unchanged; normalized weather rows can be loaded into PostgreSQL with the separate loader command.
-- The ENTSO-E parser and PostgreSQL loader are covered by a synthetic fixture based on the published XML structure; the live response still needs verification after API access is granted.
-- ENTSO-E access requires the user's own approved token. Do not paste the token into chat or source files.
-- Weather is historical model/reanalysis data served by Open-Meteo, not a claim of a local official weather station observation.
-- Dashboard, Airflow, dbt, CI, normalized analytics, and representative query results are planned phases, not completed features.
+- The ENTSO-E parser is tested against a committed sample following the A44 XML structure; I have not verified a live response because API access depends on an approved token.
+- Weather records loaded before the wind field was added have `NULL` wind values. Re-fetch the date range and re-run the loader to populate those values.
+- The SQL report is a descriptive daily comparison; it does not test correlation or causality. It includes only UTC dates present in both tables. The committed example uses the parser's synthetic price fixture and is not an analysis of live market prices.
+- The project does not yet include dbt, Airflow, or an interactive dashboard. PostgreSQL is the only normalized store; GitHub Actions currently runs lint and unit tests.
+- Open-Meteo archive values are historical model/reanalysis data, not measurements from a specific local weather station. Weather attribution is required in published outputs: **Weather data by [Open-Meteo.com](https://open-meteo.com/)** under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
-## Attribution
+## Configuration and data handling
 
-When displaying weather data, include **Weather data by [Open-Meteo.com](https://open-meteo.com/)** and the [CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/). Cite ENTSO-E as the source for market data and follow its current terms.
+`.env.example` documents local settings. Keep `.env`, API tokens, and downloaded raw responses out of Git; `.gitignore` excludes them. PostgreSQL is exposed on host port `5433` to avoid a conflict with a local PostgreSQL server on `5432`. The raw API response is kept as a separate file per run; normalized rows are updated by their source key, so rerunning a load does not create duplicate intervals.
