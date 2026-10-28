@@ -75,7 +75,11 @@ def parse_day_ahead_prices(xml_data: str | bytes) -> list[dict[str, Any]]:
     root_name = _local_name(root.tag)
     if root_name == "Acknowledgement_MarketDocument":
         reason = next(
-            (node.text.strip() for node in root.iter() if _local_name(node.tag) == "text" and node.text),
+            (
+                node.text.strip()
+                for node in root.iter()
+                if _local_name(node.tag) == "text" and node.text
+            ),
             "no price publication was returned",
         )
         raise ValueError(f"ENTSO-E returned an acknowledgement: {reason}")
@@ -144,8 +148,7 @@ def parse_day_ahead_prices(xml_data: str | bytes) -> list[dict[str, Any]]:
                 if positions != list(range(1, interval_count + 1)):
                     raise ValueError("A01 curve must provide every interval position")
                 expanded_points = [
-                    (position, position + 1, price)
-                    for position, price in positioned_points
+                    (position, position + 1, price) for position, price in positioned_points
                 ]
             else:
                 if positions[0] != 1:
@@ -166,7 +169,9 @@ def parse_day_ahead_prices(xml_data: str | bytes) -> list[dict[str, Any]]:
                     delivery_start = start + timedelta(minutes=(position - 1) * step_minutes)
                     key = (area_code, delivery_start)
                     if key in seen_intervals:
-                        raise ValueError(f"Duplicate ENTSO-E delivery interval: {delivery_start.isoformat()}")
+                        raise ValueError(
+                            f"Duplicate ENTSO-E delivery interval: {delivery_start.isoformat()}"
+                        )
                     seen_intervals.add(key)
                     rows.append(
                         {

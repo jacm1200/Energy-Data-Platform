@@ -21,8 +21,7 @@ def test_parse_a03_expands_price_blocks_to_delivery_intervals():
         Decimal("-5.00"),
     ]
     assert [row["delivery_start"] for row in rows] == [
-        datetime(2026, 1, 1, hour, tzinfo=timezone.utc)
-        for hour in range(4)
+        datetime(2026, 1, 1, hour, tzinfo=timezone.utc) for hour in range(4)
     ]
     assert rows[0]["area_code"] == "10YES-REE------0"
     assert rows[0]["currency"] == "EUR"
@@ -50,6 +49,11 @@ def test_parse_rejects_invalid_xml():
         parse_day_ahead_prices(b"<broken")
 
 
+def test_parse_rejects_empty_xml_response():
+    with pytest.raises(ValueError, match="not valid XML"):
+        parse_day_ahead_prices(b"")
+
+
 def test_parse_a01_keeps_each_fixed_interval():
     xml = b"""<Publication_MarketDocument xmlns="urn:test">
       <type>A44</type>
@@ -70,6 +74,39 @@ def test_parse_a01_keeps_each_fixed_interval():
     rows = parse_day_ahead_prices(xml)
 
     assert [row["price_amount"] for row in rows] == [Decimal("10"), Decimal("20")]
+
+
+def test_parse_a44_expands_multiple_periods_in_one_time_series():
+    xml = b"""<Publication_MarketDocument>
+      <type>A44</type>
+      <TimeSeries>
+        <in_Domain.mRID>10YES-REE------0</in_Domain.mRID>
+        <currency_Unit.name>EUR</currency_Unit.name>
+        <price_Measure_Unit.name>MWH</price_Measure_Unit.name>
+        <curveType>A01</curveType>
+        <Period>
+          <timeInterval><start>2026-01-01T00:00Z</start><end>2026-01-01T02:00Z</end></timeInterval>
+          <resolution>PT60M</resolution>
+          <Point><position>1</position><price.amount>10</price.amount></Point>
+          <Point><position>2</position><price.amount>11</price.amount></Point>
+        </Period>
+        <Period>
+          <timeInterval><start>2026-01-01T02:00Z</start><end>2026-01-01T04:00Z</end></timeInterval>
+          <resolution>PT60M</resolution>
+          <Point><position>1</position><price.amount>12</price.amount></Point>
+          <Point><position>2</position><price.amount>13</price.amount></Point>
+        </Period>
+      </TimeSeries>
+    </Publication_MarketDocument>"""
+
+    rows = parse_day_ahead_prices(xml)
+
+    assert [row["price_amount"] for row in rows] == [
+        Decimal("10"),
+        Decimal("11"),
+        Decimal("12"),
+        Decimal("13"),
+    ]
 
 
 def test_load_price_file_parses_xml_and_sends_rows_to_storage(tmp_path, monkeypatch):
