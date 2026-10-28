@@ -1,2 +1,2 @@
-day_utc,area_code,currency,price_unit,average_price,price_intervals,average_temperature_c,average_wind_speed_m_s,temperature_observations,wind_observations
-2026-01-01,10YES-REE------0,EUR,MWH,20.125,4,1.2,1.0708333333333335,24,24
+day_utc,area_code,currency,price_unit,average_price,price_intervals,average_temperature_c,average_wind_speed_m_s,temperature_observations,wind_observations,synthetic_fixture
+2026-01-01,10YES-REE------0,EUR,MWH,20.125,4,1.2,1.0708333333333335,24,24,True

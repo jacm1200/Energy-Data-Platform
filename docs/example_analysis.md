@@ -1,4 +1,4 @@
-# Example analysis
+# Example pipeline output
 
 I generated the chart and CSV beside this file from the PostgreSQL daily comparison query on 2026-10-28.
 
@@ -18,4 +18,10 @@ Regenerate both outputs after loading the two tables:
 
 ```powershell
 python -m energy_platform.report
+```
+
+For the committed fixture values, mark the report explicitly:
+
+```powershell
+python -m energy_platform.report --synthetic
 ```

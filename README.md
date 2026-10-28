@@ -63,7 +63,7 @@ python -m energy_platform.load_weather "$(find data/raw/open_meteo/2026-01-01_20
 
 The date range is half-open: `start` is included and `end` is excluded. Open-Meteo expects an inclusive end date, so the extractor adjusts that parameter. Load prices using the same pattern with `python -m energy_platform.load_entsoe_prices <path-to-xml>`. Run checks with `ruff check .` and `python -m pytest`.
 
-After loading both sources, run `python -m energy_platform.report` to query PostgreSQL and generate [`docs/daily_energy_weather.svg`](docs/daily_energy_weather.svg) plus a CSV. The query in [`sql/daily_energy_weather.sql`](sql/daily_energy_weather.sql) groups observations by UTC day and returns interval counts so the daily coverage is visible. The generated chart uses separate scales for price, temperature, and wind. [`docs/example_analysis.md`](docs/example_analysis.md) explains the committed sample result and its limits. [`docs/repository_metadata.md`](docs/repository_metadata.md) contains the suggested GitHub description and topics.
+After loading both sources, run `python -m energy_platform.report` to query PostgreSQL and generate a chart plus CSV. Use `--synthetic` when prices come from the parser fixture. The committed [ejemplo de salida del pipeline (datos sintéticos)](docs/daily_energy_weather.svg) is a pipeline demo, not an analysis of market prices. The query in [`sql/daily_energy_weather.sql`](sql/daily_energy_weather.sql) groups observations by UTC day and returns interval counts. [`docs/example_analysis.md`](docs/example_analysis.md) describes the example values and their limits. [`docs/repository_metadata.md`](docs/repository_metadata.md) contains the suggested GitHub description and topics.
 
 ## Technical decisions
 
