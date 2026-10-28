@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: energy-data-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-energy}
+      POSTGRES_USER: ${POSTGRES_USER:-energy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-energy_local_only}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-energy} -d ${POSTGRES_DB:-energy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

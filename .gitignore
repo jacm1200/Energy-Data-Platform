@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+/data/raw/
+/logs/
+target/
+dbt_packages/
+airflow/logs/
+airflow/plugins/__pycache__/
