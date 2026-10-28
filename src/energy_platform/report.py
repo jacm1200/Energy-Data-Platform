@@ -23,6 +23,9 @@ LEFT = 90
 RIGHT = 30
 PANEL_HEIGHT = 170
 PANEL_TOPS = (115, 340, 565)
+BACKGROUND_COLOR = "#ffffff"
+TEXT_COLOR = "#172033"
+ALERT_COLOR = "#a12222"
 logger = logging.getLogger(__name__)
 SYNTHETIC_LABEL = "SYNTHETIC PRICE DATA - pipeline demo, not market prices"
 
@@ -81,6 +84,10 @@ def _format_value(value: Any, unit: str, count: Any) -> str:
     return f"{value_text} ({count_text})"
 
 
+def _display_price_unit(unit: str) -> str:
+    return "MWh" if unit.casefold() == "mwh" else unit
+
+
 def _render_cards(rows: list[tuple[Any, ...]]) -> list[str]:
     day_label = "day" if len(rows) == 1 else "days"
     lines = [
@@ -99,7 +106,8 @@ def _render_cards(rows: list[tuple[Any, ...]]) -> list[str]:
     for index, row in enumerate(rows):
         x = start_x + index * (card_width + gap)
         y = 130
-        price = _format_value(row[4], f"{row[2]}/{row[3]}", row[5])
+        price_unit = _display_price_unit(row[3])
+        price = _format_value(row[4], f"{row[2]}/{price_unit}", row[5])
         temperature = _format_value(row[6], "°C", row[8])
         wind = _format_value(row[7], "m/s", row[9])
         lines.extend(
@@ -126,7 +134,8 @@ def render_svg(rows: list[tuple[Any, ...]], *, synthetic: bool = False) -> str:
         coverage_y = 50
     header = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}">',
-        "<style>text{font-family:Arial,sans-serif;fill:#172033}.title{font-size:18px;font-weight:bold}.synthetic-title{font-size:17px;font-weight:bold;fill:#a12222}.subtitle{font-size:14px}.warning{font-size:16px;font-weight:bold;fill:#a12222}.tick,.note{font-size:12px}.axis{stroke:#9aa4b2;stroke-width:1}.card{fill:#f4f7fb;stroke:#9aa4b2;stroke-width:1}.card-title{font-size:18px;font-weight:bold}.card-value{font-size:15px}</style>",
+        f'<rect width="100%" height="100%" fill="{BACKGROUND_COLOR}"/>',
+        f"<style>text{{font-family:Arial,sans-serif;fill:{TEXT_COLOR}}}.title{{font-size:18px;font-weight:bold}}.synthetic-title{{font-size:17px;font-weight:bold;fill:{ALERT_COLOR}}}.subtitle{{font-size:14px}}.warning{{font-size:16px;font-weight:bold;fill:{ALERT_COLOR}}}.tick,.note{{font-size:12px}}.axis{{stroke:#9aa4b2;stroke-width:1}}.card{{fill:#f4f7fb;stroke:#9aa4b2;stroke-width:1}}.card-title{{font-size:18px;font-weight:bold}}.card-value{{font-size:15px}}</style>",
         title,
     ]
     if synthetic:
@@ -198,6 +207,7 @@ def generate_report(
                 "area_code",
                 "currency",
                 "price_unit",
+                "price_unit_label",
                 "average_price",
                 "price_intervals",
                 "average_temperature_c",
@@ -207,7 +217,16 @@ def generate_report(
                 "synthetic_fixture",
             )
         )
-        writer.writerows((*row, synthetic) for row in rows)
+        writer.writerows(
+            (
+                *row[:3],
+                _display_price_unit(row[3]),
+                f"{row[2]}/{_display_price_unit(row[3])}",
+                *row[4:],
+                synthetic,
+            )
+            for row in rows
+        )
     return len(rows)
 
 
